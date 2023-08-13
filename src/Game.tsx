@@ -10,6 +10,12 @@ import ListItemText from '@mui/material/ListItemText';
 import { DrawSudoku, SudokuState, getOccurence, computeError, getBoardFrom } from './DrawSudoku';
 import { Container, TextField } from '@mui/material';
 import { stringify } from 'querystring';
+import { Form, useLoaderData } from "react-router-dom";
+
+export async function loader(p: { params: { keyId: string } }) {
+  const gameKeyId = p.params.keyId;
+  return { gameKeyId };
+}
 
 interface DisplayOptions {
   advMode: boolean, autoClear: boolean, autoFill: boolean, warn: boolean, affected: boolean, affectedSameNumber: boolean
@@ -35,6 +41,7 @@ function TempDrawer(option: DisplayOptions, setOptions: (option: DisplayOptions)
   const text = ['Advanved Mode', 'Auto clear candidates', 'Fill only candidate', 'Warn if wrong', 'Highlight cells', "  ... for all same numbers"]
   const qvq = ['advMode', 'autoClear', 'autoFill', 'warn', 'affected', 'affectedSameNumber']
   const enabled = [true, true, true, true, false, !option.affected]
+  const a = useLoaderData() as { gameKeyId: string };
   const list = () => (
     <Box
       sx={{ width: 250 }}
@@ -52,6 +59,12 @@ function TempDrawer(option: DisplayOptions, setOptions: (option: DisplayOptions)
             </ListItemButton>
           </ListItem>
         ))}
+        <Divider />
+        <ListItem key={"key"} disablePadding>
+          <ListItemButton disabled={true}>
+            <ListItemText primary={"Room ID: " + a.gameKeyId} />
+          </ListItemButton>
+        </ListItem>
       </List>
     </Box>
   );
@@ -140,24 +153,23 @@ function Sudoku(Options: { advMode: boolean, affected: boolean, affectedSameNumb
     //Update states when number entered
     const onKeyDown = (e: KeyboardEvent) => {
       console.log(e.key, Selection);
-      if (e.ctrlKey && e.key === 'z') {
-        Undo()
-        return
-      }
-      if (e.ctrlKey && e.key === 'y') {
-        Redo()
+      if (e.ctrlKey) {
+        if (e.key === 'z')
+          Undo()
+        if (e.key === 'y')
+          Redo()
         return
       }
       if (Selection.length === 1) {
         const row = Math.floor(Selection[0] / 9)
         const col = Selection[0] % 9
         console.log('(%d,%d)<-%s', row, col, e.key)
-        const FillIn = (e: string) => {
+        const FillIn = (toFill: string) => {
           if (!HistoryStack) return
           const State = HistoryStack.Stack[HistoryStack.Top]
           const newState = State.Fillin.split('')
-          if (e === State.Fillin.charAt(Selection[0])) return
-          newState[Selection[0]] = e
+          if (toFill === State.Fillin.charAt(Selection[0])) return
+          newState[Selection[0]] = toFill
           AddState({ Fillin: newState.join(''), Candid: State.Candid })
         }
         if (e.key.match(/[1-9]/)) {
