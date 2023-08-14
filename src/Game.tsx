@@ -9,8 +9,10 @@ import ListItemButton from '@mui/material/ListItemButton';
 import ListItemText from '@mui/material/ListItemText';
 import { DrawSudoku, SudokuState, getOccurence, computeError, getBoardFrom } from './DrawSudoku';
 import { Container, TextField } from '@mui/material';
-import { stringify } from 'querystring';
 import { Form, useLoaderData } from "react-router-dom";
+import { io, Socket } from "socket.io-client";
+import { ClientToServerEvents, ServerToClientEvents, SocketData } from "./socketInterface";
+import { emit } from 'process';
 
 export async function loader(p: { params: { keyId: string } }) {
   const gameKeyId = p.params.keyId;
@@ -41,7 +43,7 @@ function TempDrawer(option: DisplayOptions, setOptions: (option: DisplayOptions)
   const text = ['Advanved Mode', 'Auto clear candidates', 'Fill only candidate', 'Warn if wrong', 'Highlight cells', "  ... for all same numbers"]
   const qvq = ['advMode', 'autoClear', 'autoFill', 'warn', 'affected', 'affectedSameNumber']
   const enabled = [true, true, true, true, false, !option.affected]
-  const a = useLoaderData() as { gameKeyId: string };
+  const gameKeyId = (useLoaderData() as { gameKeyId: string }).gameKeyId;
   const list = () => (
     <Box
       sx={{ width: 250 }}
@@ -62,7 +64,7 @@ function TempDrawer(option: DisplayOptions, setOptions: (option: DisplayOptions)
         <Divider />
         <ListItem key={"key"} disablePadding>
           <ListItemButton disabled={true}>
-            <ListItemText primary={"Room ID: " + a.gameKeyId} />
+            <ListItemText primary={"Room ID: " + gameKeyId} />
           </ListItemButton>
         </ListItem>
       </List>
@@ -86,68 +88,83 @@ function TempDrawer(option: DisplayOptions, setOptions: (option: DisplayOptions)
 
 
 function Sudoku(Options: { advMode: boolean, affected: boolean, affectedSameNumber: boolean }) {
-  const [Clue, setClue] = React.useState<string>(initSudoku);
-  // const [State, setState] = React.useState<SudokuState>({ Fillin: initFillin, Candid: "" });
+  const [Clue, setClue] = React.useState<string>("");
   const [Selection, setSelection] = React.useState<number[]>([]);
   const [SideNumber, setSideNumber] = React.useState<number[]>(Array(9).fill(0));
   const [NotesOn, setNotesOn] = React.useState(false)
-  const [HistoryStack, setHistoryStack] = React.useState<{ Stack: SudokuState[], Top: number } | undefined>(undefined);
+  // const [HistoryStack, setHistoryStack] = React.useState<{ Stack: SudokuState[], Top: number } | undefined>(undefined);
+  const [State, setState] = React.useState<SudokuState | undefined>(undefined);
   // const State = React.useMemo(() => {HistoryStack?.Stack[HistoryStack?.Top] || null}, [HistoryStack])
-  // const State = HistoryStack?.Stack[HistoryStack?.Top] || null
-  console.log("in", HistoryStack)
+  // const State = HistoryStack?.Stack[HistoryStack?.Top] || nullls
+  const gameKeyId = (useLoaderData() as { gameKeyId: string }).gameKeyId;
+  const [newGamePending, setNewGamePending] = React.useState(false)
+  const [pendingStatus, setPendingStatus] = React.useState<number[]>([0, 0])
 
+
+
+  const setStateCombined = (State: SudokuState) => {
+    setState(State)
+    socket.emit("state", State)
+  }
+  const setSideNumberCombined = (sidenumber: number[]) => {
+    setSideNumber(sidenumber)
+    socket.emit("sidenumber", sidenumber)
+  }
+  const setSelectionCombined = (selection: number[]) => {
+    setSelection(selection)
+    socket.emit("selection", selection)
+  }
+  const setNewGamePendingCombined = (pd: boolean) => {
+    setNewGamePending(pd)
+    socket.emit("newgame", pd)
+  }
   const SetSideNumberTo = (i: number, v: number) => {
     let sn = SideNumber.slice()
     sn[i] = v
-    setSideNumber(sn)
+    setSelectionCombined(sn)
   }
-
-  const AddState = (State: SudokuState) => {
-    setHistoryStack((HistoryStack) => {
-      console.log("AddState:", HistoryStack)
-      if (HistoryStack) {
-        const top = HistoryStack.Top
-        if (HistoryStack.Stack[top].Fillin === State.Fillin && HistoryStack.Stack[top].Candid === State.Candid) return
-        return { Stack: [...HistoryStack.Stack.slice(0, top + 1), State], Top: top + 1 }
-      } else {
-        return { Stack: [State], Top: 0 }
-      }
-    })
-  }
-
-  function Undo() {
-    setHistoryStack((HistoryStack) => {
-      if (!HistoryStack) return HistoryStack
-      if (HistoryStack?.Top > 0) {
-        return { Stack: HistoryStack.Stack, Top: HistoryStack.Top - 1 }
-      }
-      return HistoryStack
-    })
-  }
-
-  function Redo() {
-    setHistoryStack((HistoryStack) => {
-      if (!HistoryStack) return HistoryStack
-      if (HistoryStack.Top < HistoryStack.Stack.length - 1) {
-        return { Stack: HistoryStack.Stack, Top: HistoryStack.Top + 1 }
-      }
-      return HistoryStack
-    })
-  }
+  const Undo = () => { socket.emit("undo") };
+  const Redo = () => { socket.emit("redo") };
 
   React.useEffect(() => {
     //Only run once
-    setClue(initSudoku);
-    setHistoryStack(undefined) //FIXME:Why not work?
-    AddState({ Fillin: initFillin, Candid: initCandid });
+    socket.emit("key", gameKeyId);
+    socket.emit("newgame", newGamePending)
+    socket.on("clue", (clue) => {
+      console.log("clue", clue)
+      setClue(clue)
+    })
+    socket.on("state", (state) => {
+      console.log("state", state)
+      setState(state)
+    })
+    socket.on("selection", (selection) => {
+      console.log("selection", selection)
+      setSelection(selection)
+    })
+    socket.on("sidenumber", (sidenumber) => {
+      console.log("sidenumber", sidenumber)
+      setSideNumber(sidenumber)
+    })
+    socket.on("pending", (pending) => {
+      console.log("pending", pending)
+      setPendingStatus(pending)
+    })
+    socket.on("resetPending", () => {
+      console.log("resetPending")
+      setNewGamePendingCombined(false)
+    })
+    // setClue(initSudoku);
+    // setState(undefined) //FIXME:Why not work?
+    // setStateCombind({ Fillin: initFillin, Candid: initCandid });
+
   }, []);
 
   React.useEffect(() => {
     //Draw Sudoku board when state changes
-    if (!HistoryStack) return
-    const State = HistoryStack?.Stack[HistoryStack?.Top]
-    DrawSudoku(Clue, State, Selection, SideNumber, Options);
-  }, [Clue, HistoryStack, Selection, SideNumber, Options]);
+    if (Clue && State)
+      DrawSudoku(Clue, State, Selection, SideNumber, Options);
+  }, [Clue, State, Selection, SideNumber, Options]);
 
   React.useEffect(() => {
     //Update states when number entered
@@ -165,12 +182,11 @@ function Sudoku(Options: { advMode: boolean, affected: boolean, affectedSameNumb
         const col = Selection[0] % 9
         console.log('(%d,%d)<-%s', row, col, e.key)
         const FillIn = (toFill: string) => {
-          if (!HistoryStack) return
-          const State = HistoryStack.Stack[HistoryStack.Top]
+          if (!State) return
           const newState = State.Fillin.split('')
           if (toFill === State.Fillin.charAt(Selection[0])) return
           newState[Selection[0]] = toFill
-          AddState({ Fillin: newState.join(''), Candid: State.Candid })
+          setStateCombined({ Fillin: newState.join(''), Candid: State.Candid })
         }
         if (e.key.match(/[1-9]/)) {
           FillIn(e.key)
@@ -184,13 +200,15 @@ function Sudoku(Options: { advMode: boolean, affected: boolean, affectedSameNumb
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [Selection, HistoryStack]);
+  }, [Selection, State]);
 
-  if (HistoryStack) {
-    const State = HistoryStack.Stack[HistoryStack.Top]
+  if (State) {
     const occurence = getOccurence(Clue, State)
     occurence.forEach((v, i) => { if (v >= 9 && SideNumber[i] === 1) SetSideNumberTo(i, 0) })
     const completed = occurence.every((v) => v >= 9) && computeError(getBoardFrom(Clue, State.Fillin)).size === 0
+    let newGameMsg = "New Game"
+    if (pendingStatus[0] > 0)
+      newGameMsg = "New Game (" + pendingStatus[0] + "/" + pendingStatus[1] + ")"
     return (<>
       <Container sx={{ display: "flex", flexDirection: "column", justifyContent: 'space-evenly', my: 10 }} maxWidth="md">
         <Box sx={{ display: "flex", flexDirection: "row", justifyContent: 'space-evenly' }}>
@@ -200,14 +218,12 @@ function Sudoku(Options: { advMode: boolean, affected: boolean, affectedSameNumb
               <Button variant="outlined" onClick={(e) => { }} disabled={true}>Notes {NotesOn ? "on" : "off"}</Button></>) : null
           }
 
-          <Button variant="outlined" onClick={(e) => { Undo() }} disabled={HistoryStack?.Top === 0}>Undo</Button>
-          <Button variant="outlined" onClick={(e) => { Redo() }} disabled={HistoryStack && HistoryStack?.Top === HistoryStack?.Stack.length - 1}>Redo</Button>
+          <Button variant="outlined" onClick={(e) => { Undo() }}>Undo</Button>
+          <Button variant="outlined" onClick={(e) => { Redo() }}>Redo</Button>
           <Button variant="outlined" onClick={(e) => { }} disabled={true}>Hint</Button>
-          <Button variant={completed ? "contained" : "outlined"} onClick={(e) => {
-            setClue(initSudoku)
-            setHistoryStack(undefined)
-            AddState({ Fillin: initFillin, Candid: initCandid })
-          }} color="success">New Game</Button>
+          <Button variant={newGamePending ? "outlined" : completed ? "contained" : "text"} onClick={(e) => {
+            setNewGamePendingCombined(!newGamePending)
+          }} color="success">{newGameMsg}</Button>
         </Box>
         <Container sx={{ display: "flex", flexDirection: "row", justifyContent: "center" }}>
           <Box>
@@ -218,17 +234,14 @@ function Sudoku(Options: { advMode: boolean, affected: boolean, affectedSameNumb
               let row = Math.floor((e.clientY - 25 - rect.top) / 50)
               console.log(row, col)
               if (row < 0 || row > 8 || col < 0 || col > 8) {
-                setSelection([])
+                setSelectionCombined([])
                 return
               }
-
-              setSelection((Selection) => {
-                if (Selection.length === 1 && Selection[0] === row * 9 + col) {
-                  return []
-                }
-                return [row * 9 + col]
-              })
-              setSideNumber(Array(9).fill(0))
+              if (Selection.length === 1 && Selection[0] === row * 9 + col)
+                setSelectionCombined([])
+              else
+                setSelectionCombined([row * 9 + col])
+              setSideNumberCombined(Array(9).fill(0))
             }}></canvas>
           </Box>
           <Box sx={{ display: "flex", flexDirection: "column", justifyContent: 'space-evenly' }}>
@@ -240,8 +253,8 @@ function Sudoku(Options: { advMode: boolean, affected: boolean, affectedSameNumb
               onClick={(e) => {
                 const sn = Array(9).fill(0)
                 sn[i] = 1 - SideNumber[i]
-                setSideNumber(sn)
-                setSelection([])
+                setSideNumberCombined(sn)
+                setSelectionCombined([])
               }}>{i + 1}</Button>))}
           </Box>
         </Container>
@@ -251,7 +264,7 @@ function Sudoku(Options: { advMode: boolean, affected: boolean, affectedSameNumb
   }
   return <>Loading...</>
 }
-const initSudoku = ".472.1.....9....2..2.9..17.6...547....5.2.6....316...9.31..7.4..5....3.....6.359."
+// const initSudoku = ".472.1.....9....2..2.9..17.6...547....5.2.6....316...9.31..7.4..5....3.....6.359."
 const initFillin = "................................................................................."
 const initCandid = ""
 export default function Game() {
@@ -264,3 +277,10 @@ export default function Game() {
   </>)
 }
 // DrawSudoku(initSudoku)
+
+const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io();
+
+socket.on("connect", () => {
+  console.log("connected")
+});
+socket.on("log", (log) => { console.log(log) })
